@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 py-modules = ['dlc']
 
 [project]
-name = "deep learning collection"
+name = "deep-learning-collection"
 version = "0.0.1"
 authors = [
     { name="Pierre Poitier", email="pierre.poitier@unamur.be" },
