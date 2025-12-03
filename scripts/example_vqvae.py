@@ -4,27 +4,26 @@ from torch.utils.data import random_split, DataLoader
 
 import lightning as pl
 from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import EarlyStopping
 
 from dlc.vq_vae.model import VQVAE
 from dlc.trainers.vqvae import VQVAELightningModule
 
 
-def launch_training():
+def launch_training(root="~/datasets/galaxy10/train", batch_size=32, n_workers=23, debug=False):
     transform = T.Compose(
         [
             T.ToTensor(),
             T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
         ]
     )
-    dataset = ImageFolder(
-        root="~/datasets/galaxy10/train", transform=transform
-    )
+    dataset = ImageFolder(root=root, transform=transform)
     train_dataset, test_dataset = random_split(dataset, lengths=(0.8, 0.2))
     print("#train samples:", len(train_dataset))
     print("#test samples:", len(test_dataset))
 
-    train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=23)
-    test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=23)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=n_workers)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=n_workers)
     print("#train batches:", len(train_dataloader))
     print("#test batches:", len(test_dataloader))
 
@@ -47,9 +46,10 @@ def launch_training():
     )
 
     lightning_trainer = pl.Trainer(
-        fast_dev_run=True,
+        fast_dev_run=debug,
         max_epochs=500,
         logger=TensorBoardLogger(save_dir="logs"),
+        callbacks=[EarlyStopping(monitor='val/total_loss', patience=10)],
     )
 
     lightning_trainer.fit(

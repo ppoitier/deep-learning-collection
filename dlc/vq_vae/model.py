@@ -9,6 +9,7 @@ from dlc.vq_vae.blocks import VQ_Encoder
 
 @dataclass
 class VQVAE_Output:
+    encoder_output: Tensor
     reconstructed_input: Tensor
     total_loss: Tensor
     reconstruction_loss: Tensor
@@ -30,7 +31,9 @@ class VQVAE(nn.Module):
         quantizer_ema_decay: float = 0.99,
     ):
         super().__init__()
+        self.embedding_dim = embedding_dim
         self.n_embeddings = n_embeddings
+
         self.encoder = VQ_Encoder(in_channels, embedding_dim, hidden_channels_enc)
         if use_quantizer_ema:
             self.quantizer = QuantizerEMA(
@@ -78,6 +81,7 @@ class VQVAE(nn.Module):
         total_loss, recon_loss = self.loss_function(x, x_hat, quantizer_output.loss)
 
         return VQVAE_Output(
+            encoder_output=z_e,
             reconstructed_input=x_hat,
             total_loss=total_loss,
             reconstruction_loss=recon_loss,

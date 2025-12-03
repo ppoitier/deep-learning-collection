@@ -1,11 +1,13 @@
 import lightning as pl
 from torch import optim
 from torchmetrics import MeanMetric
+from torchmetrics.image import StructuralSimilarityIndexMeasure
 from torchvision.utils import make_grid
 
-from dlc.vq_vae.model import VQVAE
+from dlc.vq_vae.model import VQVAE, VQVAE_Output
 from dlc.schedulers.warmup_on_plateau import WarmupReduceLROnPlateau
-from dlc.metrics.codebook_stats import CodebookStats
+from dlc.metrics.codebook_distribution import CodebookStats
+from dlc.metrics.latent_channels import LatentChannelVariance
 
 
 class VQVAELightningModule(pl.LightningModule):
@@ -28,7 +30,10 @@ class VQVAELightningModule(pl.LightningModule):
         self.val_recon_loss = MeanMetric()
         self.train_quantizer_loss = MeanMetric()
         self.val_quantizer_loss = MeanMetric()
-        self.codebook_stats = CodebookStats(n_embeddings=vq_vae.n_embeddings)
+
+        self.val_ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
+        self.val_codebook_stats = CodebookStats(n_embeddings=vq_vae.n_embeddings)
+        self.val_latent_var = LatentChannelVariance(embedding_dim=vq_vae.embedding_dim)
 
     def training_step(self, batch, batch_idx):
         x, _ = batch
@@ -44,19 +49,23 @@ class VQVAELightningModule(pl.LightningModule):
         self.log("train/recon_loss", self.train_recon_loss, on_step=False, on_epoch=True)
         self.log("train/quantizer_loss", self.train_quantizer_loss, on_step=False, on_epoch=True)
 
-        usage, perplexity = self.codebook_stats(model_output.quantized_indices)
-        self.log("train/perplexity", perplexity, on_step=True, on_epoch=True, prog_bar=True)
-
         return model_output.total_loss
 
     def validation_step(self, batch, batch_idx):
         x, _ = batch
-        model_output = self.vq_vae(x)
+        out: VQVAE_Output = self.vq_vae(x)
 
         # Log metrics
-        self.val_loss(model_output.total_loss)
-        self.val_recon_loss(model_output.reconstruction_loss)
-        self.val_quantizer_loss(model_output.quantizer_loss)
+        self.val_loss(out.total_loss)
+        self.val_recon_loss(out.reconstruction_loss)
+        self.val_quantizer_loss(out.quantizer_loss)
+
+        # SSIM (Needs [0,1] range, assuming x is [-1, 1])
+        x_norm = x * 0.5 + 0.5
+        x_rec_norm = out.reconstructed_input * 0.5 + 0.5
+        self.val_ssim(x_rec_norm, x_norm)
+        self.val_codebook_stats(out.quantized_indices)
+        self.val_latent_var(out.encoder_output)
 
         self.log("val/total_loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/recon_loss", self.val_recon_loss, on_step=False, on_epoch=True)
@@ -64,7 +73,13 @@ class VQVAELightningModule(pl.LightningModule):
 
         # Log reconstructed images once per epoch
         if batch_idx == 0:
-            self._log_images(x, model_output.reconstructed_input)
+            self._log_images(x, out.reconstructed_input)
+
+    def on_validation_epoch_end(self):
+        self.log("val/ssim", self.val_ssim.compute())
+        codebook_stats = self.val_codebook_stats.compute()
+        self.log_dict({f"val/codebook_{k}": v for k, v in codebook_stats.items()})
+        self.log("val/latent_variance", self.val_latent_var.compute())
 
     def _log_images(self, original_imgs, reconstructed_imgs):
         # We only want to log a few images
