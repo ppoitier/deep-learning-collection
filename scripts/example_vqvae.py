@@ -4,7 +4,7 @@ from torch.utils.data import random_split, DataLoader
 
 import lightning as pl
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
 from dlc.vq_vae.model import VQVAE
 from dlc.trainers.vqvae import VQVAELightningModule
@@ -45,11 +45,17 @@ def launch_training(root="~/datasets/galaxy10/train", batch_size=32, n_workers=2
         plateau_factor=0.5,
     )
 
+    checkpoint_callback = ModelCheckpoint(
+        dirpath="checkpoints",
+        save_top_k=1,
+        save_last=True,
+        monitor='val/total_loss',
+    )
     lightning_trainer = pl.Trainer(
         fast_dev_run=debug,
         max_epochs=500,
         logger=TensorBoardLogger(save_dir="logs"),
-        callbacks=[EarlyStopping(monitor='val/total_loss', patience=10)],
+        callbacks=[EarlyStopping(monitor='val/total_loss', patience=10), checkpoint_callback],
     )
 
     lightning_trainer.fit(
@@ -57,6 +63,8 @@ def launch_training(root="~/datasets/galaxy10/train", batch_size=32, n_workers=2
         train_dataloaders=train_dataloader,
         val_dataloaders=test_dataloader,
     )
+
+    print("Best model saved to:", checkpoint_callback.best_model_path)
 
 
 if __name__ == "__main__":
